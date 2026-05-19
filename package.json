@@ -1,0 +1,22 @@
+{
+  "name": "flowforge-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FlowForge AI — Zapier/n8n-style AI workflow automation platform (NestJS + Prisma + Postgres + Redis + RabbitMQ + React Flow)",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "worker",
+    "shared"
+  ],
+  "scripts": {
+    "dev:backend": "npm --workspace backend run start:dev",
+    "dev:worker": "npm --workspace worker run start:dev",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "build": "npm --workspace shared run build && npm --workspace backend run build && npm --workspace worker run build && npm --workspace frontend run build",
+    "prisma:generate": "npm --workspace backend run prisma:generate",
+    "prisma:migrate": "npm --workspace backend run prisma:migrate",
+    "docker:up": "docker compose -f docker/docker-compose.yml up --build",
+    "docker:down": "docker compose -f docker/docker-compose.yml down -v"
+  }
+}

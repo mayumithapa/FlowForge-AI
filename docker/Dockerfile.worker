@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+# Worker image. We run via ts-node so we can keep the worker's cross-package
+# imports (`../../backend/src/...`) without building a complex TS project
+# graph. The Nx/turborepo upgrade path is to publish `@flowforge/backend` as a
+# real workspace lib.
+
+FROM node:20-alpine
+WORKDIR /repo
+
+RUN apk add --no-cache openssl libc6-compat
+
+COPY package.json package-lock.json* ./
+COPY backend/package.json backend/
+COPY worker/package.json worker/
+COPY frontend/package.json frontend/
+COPY shared/package.json shared/
+
+RUN npm install --workspace backend --workspace worker --include-workspace-root --no-audit --no-fund
+
+COPY backend ./backend
+COPY worker ./worker
+COPY shared ./shared
+
+WORKDIR /repo/backend
+RUN npx prisma generate
+
+WORKDIR /repo/worker
+ENV NODE_ENV=production
+CMD ["npx", "ts-node", "--transpile-only", "src/main.ts"]

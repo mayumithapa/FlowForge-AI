@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1.7
+# ---- Builder ----------------------------------------------------------------
+FROM node:20-alpine AS builder
+WORKDIR /repo
+
+RUN apk add --no-cache openssl libc6-compat
+
+COPY package.json package-lock.json* ./
+COPY backend/package.json backend/
+COPY worker/package.json worker/
+COPY frontend/package.json frontend/
+COPY shared/package.json shared/
+
+# Install with workspaces so the root node_modules has everything backend needs.
+RUN npm install --workspace backend --include-workspace-root --no-audit --no-fund
+
+COPY backend ./backend
+COPY shared ./shared
+
+WORKDIR /repo/backend
+RUN npx prisma generate
+RUN npm run build
+
+# ---- Runner -----------------------------------------------------------------
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN apk add --no-cache openssl libc6-compat wget
+
+COPY --from=builder /repo/node_modules ./node_modules
+COPY --from=builder /repo/backend/dist ./dist
+COPY --from=builder /repo/backend/prisma ./prisma
+COPY --from=builder /repo/backend/package.json ./package.json
+
+EXPOSE 4000
+
+# Run pending migrations on every boot — safe because Prisma tracks state in
+# the `_prisma_migrations` table.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

@@ -1,0 +1,455 @@
+// ============================================================================
+// FlowForge AI — Prisma schema
+// Production-grade schema for an AI workflow automation platform.
+//
+// Conventions
+// -----------
+// * UUID primary keys everywhere (Postgres `uuid` via @db.Uuid).
+// * createdAt / updatedAt on every table. Soft delete via `deletedAt` where
+//   business logic needs to preserve history (User, Workflow, Lead, Campaign,
+//   EmailTemplate).
+// * Multi-tenant by Workspace. Every domain row is scoped to a workspaceId
+//   and indexed on (workspaceId, ...) for tenant-isolated queries.
+// * Workflow versioning: Workflow holds metadata; nodes & edges live on a
+//   WorkflowVersion so we can publish/rollback without losing history.
+// * Executions are append-only event logs to support audit + analytics.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// Identity & tenancy
+// ----------------------------------------------------------------------------
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  fullName     String?
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships    WorkspaceMember[]
+  refreshTokens  RefreshToken[]
+  ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
+
+  @@index([deletedAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  userAgent String?
+  ip        String?
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  ownerId   String   @db.Uuid
+  owner     User     @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+
+  members         WorkspaceMember[]
+  workflows       Workflow[]
+  leads           Lead[]
+  emailTemplates  EmailTemplate[]
+  campaigns       Campaign[]
+  jobLogs         JobLog[]
+  executions      WorkflowExecution[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([ownerId])
+  @@index([deletedAt])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  role        UserRole  @default(MEMBER)
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// Workflows
+// ----------------------------------------------------------------------------
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum NodeType {
+  TRIGGER_WEBHOOK
+  TRIGGER_MANUAL
+  TRIGGER_SCHEDULE
+  AI_CLASSIFY
+  AI_SENTIMENT
+  AI_SUMMARIZE
+  AI_GENERATE_EMAIL
+  EMAIL_SEND
+  DB_UPDATE_LEAD
+  ANALYTICS_RECORD
+  CONDITION
+  DELAY
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+  RETRYING
+}
+
+model Workflow {
+  id             String         @id @default(uuid()) @db.Uuid
+  workspaceId    String         @db.Uuid
+  name           String
+  description    String?
+  status         WorkflowStatus @default(DRAFT)
+  publishedVersionId String?    @db.Uuid
+
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions       WorkflowVersion[] @relation("WorkflowVersions")
+  publishedVersion WorkflowVersion? @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+  executions     WorkflowExecution[]
+  campaigns      Campaign[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, deletedAt])
+}
+
+model WorkflowVersion {
+  id          String     @id @default(uuid()) @db.Uuid
+  workflowId  String     @db.Uuid
+  version     Int
+  // The full node/edge graph stored as JSON for cheap reads. The normalized
+  // WorkflowNode rows below are used by the engine for execution.
+  graph       Json
+  isPublished Boolean    @default(false)
+
+  workflow    Workflow   @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  publishedOn Workflow[] @relation("PublishedVersion")
+  nodes       WorkflowNode[]
+  edges       WorkflowEdge[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+}
+
+model WorkflowNode {
+  id           String   @id @default(uuid()) @db.Uuid
+  versionId    String   @db.Uuid
+  // Client-side node id used in the React Flow graph.
+  nodeKey      String
+  type         NodeType
+  // Free-form configuration (model, prompt, template id, channel, etc.)
+  config       Json
+  positionX    Float
+  positionY    Float
+
+  version      WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, nodeKey])
+  @@index([versionId])
+  @@index([type])
+}
+
+model WorkflowEdge {
+  id         String   @id @default(uuid()) @db.Uuid
+  versionId  String   @db.Uuid
+  sourceKey  String
+  targetKey  String
+  // Optional branch label (e.g. "true" / "false" for a condition node).
+  label      String?
+
+  version    WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId])
+  @@index([versionId, sourceKey])
+}
+
+model WorkflowExecution {
+  id           String          @id @default(uuid()) @db.Uuid
+  workspaceId  String          @db.Uuid
+  workflowId   String          @db.Uuid
+  versionId    String?         @db.Uuid
+  status       ExecutionStatus @default(PENDING)
+  triggeredBy  String?
+  // The seed input (webhook payload, lead id, manual data, etc.)
+  input        Json?
+  output       Json?
+  error        String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  durationMs   Int?
+
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow     Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  steps        ExecutionStep[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workflowId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ExecutionStep {
+  id           String          @id @default(uuid()) @db.Uuid
+  executionId  String          @db.Uuid
+  nodeKey      String
+  nodeType     NodeType
+  status       ExecutionStatus @default(PENDING)
+  attempt      Int             @default(0)
+  input        Json?
+  output       Json?
+  error        String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  durationMs   Int?
+
+  execution    WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([executionId])
+  @@index([executionId, status])
+}
+
+// ----------------------------------------------------------------------------
+// Leads, Email, Campaigns
+// ----------------------------------------------------------------------------
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+  CHURNED
+}
+
+model Lead {
+  id           String     @id @default(uuid()) @db.Uuid
+  workspaceId  String     @db.Uuid
+  email        String
+  fullName     String?
+  company      String?
+  source       String?
+  status       LeadStatus @default(NEW)
+  // AI enrichments.
+  classification String?
+  sentiment      String?
+  score          Float?
+  // Anything else from the import (CSV row).
+  metadata     Json?
+
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  emails       EmailMessage[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, deletedAt])
+}
+
+model EmailTemplate {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  name         String
+  subject      String
+  bodyMarkdown String
+  // Variables expected in the template, e.g. ["fullName", "company"].
+  variables    String[]
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns    Campaign[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([workspaceId])
+  @@index([workspaceId, deletedAt])
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @db.Uuid
+  name            String
+  status          CampaignStatus @default(DRAFT)
+  workflowId      String?        @db.Uuid
+  templateId      String?        @db.Uuid
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  totalRecipients Int            @default(0)
+  totalSent       Int            @default(0)
+  totalOpened     Int            @default(0)
+  totalClicked    Int            @default(0)
+  totalFailed     Int            @default(0)
+
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow        Workflow?      @relation(fields: [workflowId], references: [id])
+  template        EmailTemplate? @relation(fields: [templateId], references: [id])
+  emails          EmailMessage[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, scheduledAt])
+}
+
+enum EmailStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  BOUNCED
+  OPENED
+  CLICKED
+}
+
+model EmailMessage {
+  id           String      @id @default(uuid()) @db.Uuid
+  workspaceId  String      @db.Uuid
+  leadId       String?     @db.Uuid
+  campaignId   String?     @db.Uuid
+  toEmail      String
+  subject      String
+  bodyHtml     String
+  bodyText     String?
+  status       EmailStatus @default(QUEUED)
+  providerId   String?
+  error        String?
+  sentAt       DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+
+  lead         Lead?       @relation(fields: [leadId], references: [id])
+  campaign     Campaign?   @relation(fields: [campaignId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([campaignId, status])
+  @@index([leadId])
+}
+
+// ----------------------------------------------------------------------------
+// Analytics + Jobs
+// ----------------------------------------------------------------------------
+
+model AnalyticsEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  name         String
+  // Free-form payload. Use jsonb @@index on (workspaceId, name, createdAt).
+  payload      Json?
+  occurredAt   DateTime @default(now())
+
+  @@index([workspaceId, name, occurredAt])
+}
+
+enum JobStatus {
+  QUEUED
+  IN_PROGRESS
+  SUCCESS
+  FAILED
+  RETRYING
+  DEAD
+}
+
+model JobLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String?   @db.Uuid
+  queue         String
+  jobName       String
+  // Idempotency key used to de-duplicate jobs across retries / republishes.
+  idempotencyKey String?  @unique
+  status        JobStatus @default(QUEUED)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  payload       Json?
+  result        Json?
+  error         String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  nextRetryAt   DateTime?
+
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([queue, status])
+  @@index([status, nextRetryAt])
+  @@index([workspaceId, createdAt])
+}
