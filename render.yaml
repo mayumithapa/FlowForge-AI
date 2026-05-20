@@ -38,12 +38,13 @@ services:
         sync: false   # set to your Vercel URL after deploying frontend
 
   # ── Worker (RabbitMQ consumer) ───────────────────────────────────────────────
-  - type: worker
+  - type: web
     name: flowforge-worker
     runtime: docker
     dockerfilePath: ./docker/Dockerfile.worker
     dockerContext: .
     plan: free
+    healthCheckPath: /
     envVars:
       - key: NODE_ENV
         value: production
