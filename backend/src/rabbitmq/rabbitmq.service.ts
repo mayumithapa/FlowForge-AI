@@ -65,9 +65,21 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`RabbitMQ connected (${url})`);
     } catch (err) {
       this.logger.error(`RabbitMQ connect failed: ${(err as Error).message}; retrying in 5s`);
+      this.connecting = false;
       setTimeout(() => this.connect(), 5000);
     } finally {
       this.connecting = false;
+    }
+  }
+
+  /** Wait until this.channel is populated (up to timeoutMs). */
+  private async waitForChannel(timeoutMs = 60_000): Promise<void> {
+    const start = Date.now();
+    while (!this.channel) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error('RabbitMQ: channel not available after timeout — check RABBITMQ_URL');
+      }
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
 
@@ -97,9 +109,7 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
     payload: unknown,
     opts: PublishOptions = {},
   ): Promise<string> {
-    if (!this.channel) {
-      await this.connect();
-    }
+    if (!this.channel) await this.waitForChannel();
     const messageId = opts.idempotencyKey ?? uuid();
     const headers: Record<string, unknown> = {
       'x-idempotency-key': messageId,
@@ -134,7 +144,7 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
     handler: (payload: unknown, meta: { attempt: number; messageId: string }) => Promise<void>,
     opts: { maxAttempts?: number } = {},
   ) {
-    if (!this.channel) await this.connect();
+    if (!this.channel) await this.waitForChannel();
     const maxAttempts = opts.maxAttempts ?? 5;
 
     await this.channel!.consume(queue, async (msg) => {
