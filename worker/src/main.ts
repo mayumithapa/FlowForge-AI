@@ -8,25 +8,36 @@ import { EmailConsumer } from './consumers/email.consumer';
 import { AnalyticsConsumer } from './consumers/analytics.consumer';
 
 async function bootstrap() {
-  const app = await NestFactory.createApplicationContext(WorkerModule, {
-    logger: ['log', 'error', 'warn', 'debug'],
-  });
-
-  await app.get(WorkflowConsumer).start();
-  await app.get(EmailConsumer).start();
-  await app.get(AnalyticsConsumer).start();
-
-  Logger.log('FlowForge worker is consuming queues. Press Ctrl-C to stop.', 'Bootstrap');
-
-  // Minimal HTTP server so Render free-tier web services can health-check this process.
+  // 1️⃣ Start health-check HTTP server FIRST so Render detects the port immediately.
   const port = parseInt(process.env.PORT ?? '3001', 10);
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', service: 'flowforge-worker' }));
   });
-  server.listen(port, () =>
-    Logger.log(`Health server listening on :${port}`, 'Bootstrap'),
-  );
+  await new Promise<void>((resolve) => server.listen(port, resolve));
+  Logger.log(`Health server listening on :${port}`, 'Bootstrap');
+
+  // 2️⃣ Boot NestJS application context (connects Prisma, Redis, RabbitMQ).
+  const app = await NestFactory.createApplicationContext(WorkerModule, {
+    logger: ['log', 'error', 'warn', 'debug'],
+  });
+
+  // 3️⃣ Start consumers — non-blocking so startup doesn't crash if MQ is slow.
+  const startConsumers = async () => {
+    try {
+      await app.get(WorkflowConsumer).start();
+      await app.get(EmailConsumer).start();
+      await app.get(AnalyticsConsumer).start();
+      Logger.log('All consumers started.', 'Bootstrap');
+    } catch (err) {
+      Logger.error(`Consumer start failed: ${(err as Error).message}`, 'Bootstrap');
+      // Retry after 10s — RabbitMQ might still be connecting.
+      setTimeout(startConsumers, 10_000);
+    }
+  };
+  startConsumers();
+
+  Logger.log('FlowForge worker is running. Press Ctrl-C to stop.', 'Bootstrap');
 
   const shutdown = async (sig: string) => {
     Logger.log(`Received ${sig}; shutting down`, 'Bootstrap');

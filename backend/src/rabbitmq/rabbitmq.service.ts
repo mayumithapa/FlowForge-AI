@@ -50,7 +50,8 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
     const url = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
 
     try {
-      this.connection = await amqp.connect(url);
+      const connectOpts = url.startsWith('amqps://') ? { rejectUnauthorized: false } : undefined;
+      this.connection = await amqp.connect(url, connectOpts);
       this.connection!.on('close', () => {
         this.logger.warn('RabbitMQ connection closed; reconnecting in 5s');
         setTimeout(() => this.connect(), 5000);
