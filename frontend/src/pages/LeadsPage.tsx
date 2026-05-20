@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +35,7 @@ export function LeadsPage() {
   const [triggerWorkflowId, setTriggerWorkflowId] = useState<string>('');
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     if (!workspace) return;
@@ -96,22 +97,20 @@ export function LeadsPage() {
                 </option>
               ))}
             </select>
-            <label className="inline-flex">
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                hidden
-                onChange={(e) => e.target.files && importCsv(e.target.files[0])}
-              />
-              <Button asChild disabled={importing}>
-                <span>
-                  <Upload size={16} /> Import CSV
-                </span>
-              </Button>
-            </label>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={(e) => e.target.files && importCsv(e.target.files[0])}
+            />
+            <Button onClick={() => fileInputRef.current?.click()} disabled={importing}>
+              <Upload size={16} /> Import CSV
+            </Button>
           </>
         }
       />
+
       <div className="space-y-4 p-8">
         <Card>
           <CardContent className="p-4">

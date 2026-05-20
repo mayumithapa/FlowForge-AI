@@ -13,3 +13,12 @@ coverage/
 .vscode/
 *.tsbuildinfo
 prisma/migrations/dev.db*
+
+# Test files
+leads.csv
+*.csv
+
+# Sub-package lock files (root lock file is authoritative)
+backend/package-lock.json
+frontend/package-lock.json
+worker/package-lock.json

@@ -27,7 +27,7 @@ const QUEUE_BINDINGS: Array<{ queue: QueueName; pattern: string }> = [
 @Injectable()
 export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RabbitMQService.name);
-  private connection?: amqp.Connection;
+  private connection?: amqp.ChannelModel;
   private channel?: amqp.Channel;
   private connecting = false;
 
@@ -51,17 +51,17 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
 
     try {
       this.connection = await amqp.connect(url);
-      this.connection.on('close', () => {
+      this.connection!.on('close', () => {
         this.logger.warn('RabbitMQ connection closed; reconnecting in 5s');
         setTimeout(() => this.connect(), 5000);
       });
-      this.connection.on('error', (err) =>
+      this.connection!.on('error', (err: Error) =>
         this.logger.error(`RabbitMQ error: ${err.message}`),
       );
 
-      this.channel = await this.connection.createChannel();
-      await this.channel.prefetch(parseInt(process.env.WORKER_CONCURRENCY || '5', 10));
-      await this.setupTopology(this.channel);
+      this.channel = await this.connection!.createChannel();
+      await this.channel!.prefetch(parseInt(process.env.WORKER_CONCURRENCY || '5', 10));
+      await this.setupTopology(this.channel!);
       this.logger.log(`RabbitMQ connected (${url})`);
     } catch (err) {
       this.logger.error(`RabbitMQ connect failed: ${(err as Error).message}; retrying in 5s`);

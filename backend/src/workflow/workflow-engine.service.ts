@@ -185,17 +185,17 @@ export class WorkflowEngineService {
       case NodeType.AI_CLASSIFY: {
         const text = String(input.text ?? input.message ?? input.email ?? JSON.stringify(input));
         const categories = (cfg.categories as string[]) ?? ['hot', 'warm', 'cold'];
-        return this.ai.classify(execution.workspaceId, text, categories);
+        return this.ai.classify(execution.workspaceId, text, categories) as unknown as Record<string, unknown>;
       }
 
       case NodeType.AI_SENTIMENT: {
         const text = String(input.text ?? input.message ?? JSON.stringify(input));
-        return this.ai.sentiment(execution.workspaceId, text);
+        return this.ai.sentiment(execution.workspaceId, text) as unknown as Record<string, unknown>;
       }
 
       case NodeType.AI_SUMMARIZE: {
         const text = String(input.text ?? input.message ?? JSON.stringify(input));
-        return this.ai.summarize(execution.workspaceId, text, Number(cfg.maxWords ?? 60));
+        return this.ai.summarize(execution.workspaceId, text, Number(cfg.maxWords ?? 60)) as unknown as Record<string, unknown>;
       }
 
       case NodeType.AI_GENERATE_EMAIL: {
@@ -208,7 +208,7 @@ export class WorkflowEngineService {
           recipientName: String(lead.fullName ?? ''),
           recipientCompany: String(lead.company ?? ''),
           context: input,
-        });
+        }) as unknown as Record<string, unknown>;
       }
 
       case NodeType.EMAIL_SEND: {
@@ -240,7 +240,8 @@ export class WorkflowEngineService {
         const leadId = String(input.leadId ?? cfg.leadId ?? '');
         if (!leadId) throw new Error('db_update_lead: leadId missing');
         const patch: Prisma.LeadUpdateInput = {};
-        if (input.classification) patch.classification = String(input.classification);
+        const classification = input.classification ?? input.category;
+        if (classification) patch.classification = String(classification);
         if (input.sentiment) patch.sentiment = String(input.sentiment);
         if (typeof input.score === 'number') patch.score = input.score;
         if (typeof cfg.status === 'string') patch.status = cfg.status as Prisma.LeadUpdateInput['status'];
@@ -274,25 +275,38 @@ export class WorkflowEngineService {
   }
 
   // --------------------------------------------------------------------------
-  // Helpers
-  // --------------------------------------------------------------------------
+  private getAncestors(nodeKey: string, edges: WorkflowEdge[]): string[] {
+    const ancestors = new Set<string>();
+    const queue = [nodeKey];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const upstream = edges.filter((e) => e.targetKey === current);
+      for (const edge of upstream) {
+        if (!ancestors.has(edge.sourceKey)) {
+          ancestors.add(edge.sourceKey);
+          queue.push(edge.sourceKey);
+        }
+      }
+    }
+    return Array.from(ancestors);
+  }
+
   private collectInputs(
     node: WorkflowNode,
     edges: WorkflowEdge[],
     context: Record<string, unknown>,
     rootInput: Prisma.JsonValue | null,
   ): Record<string, unknown> {
-    const upstream = edges.filter((e) => e.targetKey === node.nodeKey);
-    if (upstream.length === 0) {
-      return { ...((rootInput as object) ?? {}) };
-    }
+    const ancestors = this.getAncestors(node.nodeKey, edges);
     const merged: Record<string, unknown> = { ...((rootInput as object) ?? {}) };
-    for (const e of upstream) {
-      const src = context[e.sourceKey];
-      if (src && typeof src === 'object') {
-        Object.assign(merged, src as object);
-      } else if (src !== undefined) {
-        merged[e.sourceKey] = src;
+    for (const key of Object.keys(context)) {
+      if (ancestors.includes(key) || key === 'input') {
+        const src = context[key];
+        if (src && typeof src === 'object') {
+          Object.assign(merged, src as object);
+        } else if (src !== undefined) {
+          merged[key] = src;
+        }
       }
     }
     return merged;

@@ -191,7 +191,7 @@ export class WorkflowService {
       if (!ids.has(e.target)) throw new BadRequestException(`Edge target ${e.target} missing`);
     }
     const triggers = graph.nodes.filter((n) =>
-      [NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK, NodeType.TRIGGER_SCHEDULE].includes(n.type),
+      ([NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK, NodeType.TRIGGER_SCHEDULE] as NodeType[]).includes(n.type),
     );
     if (triggers.length === 0) throw new BadRequestException('Graph needs at least one trigger node');
 
