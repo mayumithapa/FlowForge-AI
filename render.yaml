@@ -1,0 +1,72 @@
+services:
+  # ── Backend API ──────────────────────────────────────────────────────────────
+  - type: web
+    name: flowforge-backend
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.backend
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowforge-db
+          property: connectionString
+      - key: REDIS_URL
+        sync: false   # set manually in dashboard
+      - key: RABBITMQ_URL
+        sync: false   # set manually in dashboard
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 900
+      - key: JWT_REFRESH_TTL
+        value: 2592000
+      - key: OPENAI_API_KEY
+        sync: false   # set manually in dashboard
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: AI_RATE_LIMIT_PER_MIN
+        value: 60
+      - key: CORS_ORIGIN
+        sync: false   # set to your Vercel URL after deploying frontend
+
+  # ── Worker (RabbitMQ consumer) ───────────────────────────────────────────────
+  - type: worker
+    name: flowforge-worker
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.worker
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowforge-db
+          property: connectionString
+      - key: REDIS_URL
+        sync: false
+      - key: RABBITMQ_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: AI_RATE_LIMIT_PER_MIN
+        value: 60
+      - key: WORKER_CONCURRENCY
+        value: 5
+
+# ── PostgreSQL Database ─────────────────────────────────────────────────────────
+databases:
+  - name: flowforge-db
+    plan: free
+    databaseName: flowforge
+    user: flowforge
