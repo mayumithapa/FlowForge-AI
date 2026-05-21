@@ -1,23 +1,36 @@
-import { useEffect, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 
 interface Point { day: string; status: string; count: number; }
-interface QueueStats { [queue: string]: Record<string, number> }
+type QueueStats = Record<string, Record<string, number>>;
 
 export function AnalyticsPage() {
   const { workspace } = useAuthStore();
-  const [series, setSeries] = useState<Point[]>([]);
-  const [queue, setQueue] = useState<QueueStats>({});
+  const wsId = workspace?.id;
 
-  useEffect(() => {
-    if (!workspace) return;
-    api.get<Point[]>(`/workspaces/${workspace.id}/analytics/executions?days=30`).then(setSeries);
-    api.get<QueueStats>(`/workspaces/${workspace.id}/queue/stats`).then(setQueue).catch(() => undefined);
-  }, [workspace]);
+  const results = useQueries({
+    queries: [
+      {
+        queryKey: qk.analyticsExecutions(wsId ?? '', 30),
+        queryFn: () => api.get<Point[]>(`/workspaces/${wsId}/analytics/executions?days=30`),
+        enabled: !!wsId,
+      },
+      {
+        queryKey: qk.queueStats(wsId ?? ''),
+        queryFn: () => api.get<QueueStats>(`/workspaces/${wsId}/queue/stats`),
+        enabled: !!wsId,
+        // The queue dashboard benefits from a faster refresh than the default 30s.
+        refetchInterval: 10_000,
+      },
+    ],
+  });
+  const series = (results[0].data ?? []) as Point[];
+  const queue = (results[1].data ?? {}) as QueueStats;
 
   const data = byDay(series);
 
@@ -47,7 +60,7 @@ export function AnalyticsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Queue health</CardTitle>
+            <CardTitle>Queue health (auto-refreshes every 10s)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/table';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 import { relativeTime } from '@/lib/utils';
 
@@ -28,38 +30,43 @@ interface Workflow {
 }
 
 export function LeadsPage() {
+  const qc = useQueryClient();
   const { workspace } = useAuthStore();
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const wsId = workspace?.id;
+
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [triggerWorkflowId, setTriggerWorkflowId] = useState<string>('');
-  const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
-    if (!workspace) return;
-    const r = await api.get<{ items: Lead[] }>(`/workspaces/${workspace.id}/leads?take=200${search ? `&q=${encodeURIComponent(search)}` : ''}`);
-    setLeads(r.items);
-    const wfs = await api.get<Workflow[]>(`/workspaces/${workspace.id}/workflows`);
-    setWorkflows(wfs.filter((w) => w.publishedVersionId));
-  };
+  const leadsQ = useQuery({
+    queryKey: qk.leads(wsId ?? '', search),
+    queryFn: () =>
+      api.get<{ items: Lead[] }>(
+        `/workspaces/${wsId}/leads?take=200${search ? `&q=${encodeURIComponent(search)}` : ''}`,
+      ),
+    enabled: !!wsId,
+  });
 
-  useEffect(() => {
-    load();
-  }, [workspace]);
+  const workflowsQ = useQuery({
+    queryKey: qk.workflows(wsId ?? ''),
+    queryFn: () => api.get<Workflow[]>(`/workspaces/${wsId}/workflows`),
+    enabled: !!wsId,
+    select: (list) => list.filter((w) => w.publishedVersionId),
+  });
 
-  const importCsv = async (file: File) => {
-    if (!workspace) return;
-    setImporting(true);
-    setMessage(null);
-    try {
+  const leads = leadsQ.data?.items ?? [];
+  const workflows = workflowsQ.data ?? [];
+
+  const importMutation = useMutation({
+    mutationFn: async (file: File) => {
       const text = await file.text();
       const rows = parseCsv(text);
       const payload = {
-        workspaceId: workspace.id,
+        workspaceId: wsId!,
         leads: rows.map((r) => ({
-          workspaceId: workspace.id,
+          workspaceId: wsId!,
           email: r.email,
           fullName: r.fullName ?? r.name ?? undefined,
           company: r.company ?? undefined,
@@ -68,15 +75,18 @@ export function LeadsPage() {
         })),
         triggerWorkflowId: triggerWorkflowId || undefined,
       };
-      const res = await api.post<{ imported: number }>(`/workspaces/${workspace.id}/leads/import`, payload);
+      return api.post<{ imported: number }>(`/workspaces/${wsId}/leads/import`, payload);
+    },
+    onSuccess: (res) => {
       setMessage(`Imported ${res.imported} leads${triggerWorkflowId ? ' and queued workflows' : ''}.`);
-      await load();
-    } catch (err) {
-      setMessage((err as Error).message);
-    } finally {
-      setImporting(false);
-    }
-  };
+      // One mutation, four caches invalidated — the win that justifies TanStack Query.
+      qc.invalidateQueries({ queryKey: ['leads', wsId] });
+      qc.invalidateQueries({ queryKey: qk.analyticsSummary(wsId ?? '') });
+      qc.invalidateQueries({ queryKey: ['analytics', wsId] });
+      qc.invalidateQueries({ queryKey: qk.queueStats(wsId ?? '') });
+    },
+    onError: (err) => setMessage((err as Error).message),
+  });
 
   return (
     <>
@@ -102,10 +112,10 @@ export function LeadsPage() {
               ref={fileInputRef}
               accept=".csv,text/csv"
               style={{ display: 'none' }}
-              onChange={(e) => e.target.files && importCsv(e.target.files[0])}
+              onChange={(e) => e.target.files && importMutation.mutate(e.target.files[0])}
             />
-            <Button onClick={() => fileInputRef.current?.click()} disabled={importing}>
-              <Upload size={16} /> Import CSV
+            <Button onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending}>
+              <Upload size={16} /> {importMutation.isPending ? 'Importing…' : 'Import CSV'}
             </Button>
           </>
         }
@@ -116,9 +126,9 @@ export function LeadsPage() {
           <CardContent className="p-4">
             <Input
               placeholder="Search by email or name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && load()}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && setSearch(searchInput)}
             />
           </CardContent>
         </Card>
@@ -153,10 +163,17 @@ export function LeadsPage() {
                     <TD>{relativeTime(l.createdAt)}</TD>
                   </TR>
                 ))}
-                {leads.length === 0 && (
+                {leads.length === 0 && !leadsQ.isLoading && (
                   <TR>
                     <TD colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
                       No leads yet. Drop a CSV above with columns: email, fullName, company.
+                    </TD>
+                  </TR>
+                )}
+                {leadsQ.isLoading && (
+                  <TR>
+                    <TD colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
+                      Loading…
                     </TD>
                   </TR>
                 )}

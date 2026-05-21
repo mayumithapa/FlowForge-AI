@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 
 interface Profile {
@@ -16,27 +18,28 @@ interface Profile {
 }
 
 export function SettingsPage() {
+  const qc = useQueryClient();
   const { user, workspace } = useAuthStore();
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [fullName, setFullName] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.get<Profile>('/users/me').then((p) => {
-      setProfile(p);
-      setFullName(p.fullName ?? '');
-    });
-  }, []);
+  const { data: profile } = useQuery({
+    queryKey: qk.me(),
+    queryFn: () => api.get<Profile>('/users/me'),
+  });
 
-  const save = async () => {
-    setMessage(null);
-    try {
-      await api.patch('/users/me', { fullName });
+  useEffect(() => {
+    if (profile) setFullName(profile.fullName ?? '');
+  }, [profile]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.patch('/users/me', { fullName }),
+    onSuccess: () => {
       setMessage('Profile saved.');
-    } catch (err) {
-      setMessage((err as Error).message);
-    }
-  };
+      qc.invalidateQueries({ queryKey: qk.me() });
+    },
+    onError: (err) => setMessage((err as Error).message),
+  });
 
   return (
     <>
@@ -55,7 +58,9 @@ export function SettingsPage() {
               <Label>Full name</Label>
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
             </div>
-            <Button onClick={save}>Save</Button>
+            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
             {message && <p className="text-sm text-muted-foreground">{message}</p>}
           </CardContent>
         </Card>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { qk } from '@/lib/query-client';
 import ReactFlow, {
   addEdge,
   Background,
@@ -96,42 +98,46 @@ function FlowNode({ data, selected }: NodeProps) {
 export function WorkflowBuilderPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const qc = useQueryClient();
   const { workspace } = useAuthStore();
+  const wsId = workspace?.id;
 
-  const [workflow, setWorkflow] = useState<WorkflowData | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected] = useState<Node | null>(null);
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const nodeTypes = useMemo(() => ({ flowforge: FlowNode }), []);
 
+  const workflowQ = useQuery({
+    queryKey: qk.workflow(wsId ?? '', id ?? ''),
+    queryFn: () => api.get<WorkflowData>(`/workspaces/${wsId}/workflows/${id}`),
+    enabled: !!wsId && !!id,
+  });
+  const workflow = workflowQ.data ?? null;
+
   useEffect(() => {
-    if (!workspace || !id) return;
-    api.get<WorkflowData>(`/workspaces/${workspace.id}/workflows/${id}`).then((wf) => {
-      setWorkflow(wf);
-      const version = wf.publishedVersion ?? wf.versions[0];
-      if (version) {
-        setNodes(
-          version.nodes.map((n) => ({
-            id: n.nodeKey,
-            type: 'flowforge',
-            position: { x: n.positionX, y: n.positionY },
-            data: { type: n.type, config: n.config },
-          })),
-        );
-        setEdges(
-          version.edges.map((e: any, i: number) => ({
-            id: `e${i}-${e.sourceKey}-${e.targetKey}`,
-            source: e.sourceKey,
-            target: e.targetKey,
-            animated: true,
-          })),
-        );
-      }
-    });
-  }, [workspace, id, setNodes, setEdges]);
+    if (!workflow) return;
+    const version = workflow.publishedVersion ?? workflow.versions[0];
+    if (version) {
+      setNodes(
+        version.nodes.map((n) => ({
+          id: n.nodeKey,
+          type: 'flowforge',
+          position: { x: n.positionX, y: n.positionY },
+          data: { type: n.type, config: n.config },
+        })),
+      );
+      setEdges(
+        version.edges.map((e: any, i: number) => ({
+          id: `e${i}-${e.sourceKey}-${e.targetKey}`,
+          source: e.sourceKey,
+          target: e.targetKey,
+          animated: true,
+        })),
+      );
+    }
+  }, [workflow, setNodes, setEdges]);
 
   const onConnect = useCallback((c: Connection) => setEdges((eds) => addEdge({ ...c, animated: true }, eds)), [setEdges]);
 
@@ -146,42 +152,43 @@ export function WorkflowBuilderPage() {
     setNodes((nds) => nds.concat(newNode));
   };
 
-  const save = async (publish: boolean) => {
-    if (!workspace || !workflow) return;
-    setSaving(true);
-    setMessage(null);
-    const graph = {
-      nodes: nodes.map((n) => ({
-        id: n.id,
-        type: n.data.type,
-        config: n.data.config ?? {},
-        positionX: n.position.x,
-        positionY: n.position.y,
-      })),
-      edges: edges.map((e) => ({ source: e.source, target: e.target, label: e.label as string | undefined })),
-    };
-    try {
-      await api.post(`/workspaces/${workspace.id}/workflows/${workflow.id}/graph`, { graph, publish });
+  const saveMutation = useMutation({
+    mutationFn: ({ publish }: { publish: boolean }) => {
+      const graph = {
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          type: n.data.type,
+          config: n.data.config ?? {},
+          positionX: n.position.x,
+          positionY: n.position.y,
+        })),
+        edges: edges.map((e) => ({ source: e.source, target: e.target, label: e.label as string | undefined })),
+      };
+      return api.post(`/workspaces/${wsId}/workflows/${workflow!.id}/graph`, { graph, publish });
+    },
+    onSuccess: (_data, { publish }) => {
       setMessage(publish ? 'Saved & published!' : 'Draft saved.');
-    } catch (err) {
-      setMessage((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
+      qc.invalidateQueries({ queryKey: qk.workflow(wsId ?? '', id ?? '') });
+      qc.invalidateQueries({ queryKey: qk.workflows(wsId ?? '') });
+    },
+    onError: (err) => setMessage((err as Error).message),
+  });
+  const saving = saveMutation.isPending;
+  const save = (publish: boolean) => saveMutation.mutate({ publish });
 
-  const run = async () => {
-    if (!workspace || !workflow) return;
-    setMessage(null);
-    try {
-      const execution = await api.post<{ id: string }>(`/workspaces/${workspace.id}/workflows/${workflow.id}/run`, {
+  const runMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ id: string }>(`/workspaces/${wsId}/workflows/${workflow!.id}/run`, {
         input: { source: 'manual-run' },
-      });
+      }),
+    onSuccess: (execution) => {
       setMessage(`Execution queued: ${execution.id.slice(0, 8)}…`);
-    } catch (err) {
-      setMessage((err as Error).message);
-    }
-  };
+      qc.invalidateQueries({ queryKey: qk.workflowExecutions(wsId ?? '', id ?? '') });
+      qc.invalidateQueries({ queryKey: qk.analyticsSummary(wsId ?? '') });
+    },
+    onError: (err) => setMessage((err as Error).message),
+  });
+  const run = () => runMutation.mutate();
 
   const updateSelectedConfig = (key: string, value: string) => {
     if (!selected) return;

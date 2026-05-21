@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 
 interface Template {
@@ -18,33 +20,32 @@ interface Template {
 }
 
 export function TemplatesPage() {
+  const qc = useQueryClient();
   const { workspace } = useAuthStore();
-  const [items, setItems] = useState<Template[]>([]);
+  const wsId = workspace?.id;
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
-  const load = async () => {
-    if (!workspace) return;
-    setItems(await api.get<Template[]>(`/workspaces/${workspace.id}/email-templates`));
-  };
+  const { data: items = [] } = useQuery({
+    queryKey: qk.templates(wsId ?? ''),
+    queryFn: () => api.get<Template[]>(`/workspaces/${wsId}/email-templates`),
+    enabled: !!wsId,
+  });
 
-  useEffect(() => {
-    load();
-  }, [workspace]);
+  const createMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/workspaces/${wsId}/email-templates`, { name, subject, bodyMarkdown: body }),
+    onSuccess: () => {
+      setName(''); setSubject(''); setBody('');
+      qc.invalidateQueries({ queryKey: qk.templates(wsId ?? '') });
+    },
+  });
 
-  const create = async () => {
-    if (!workspace || !name.trim()) return;
-    await api.post(`/workspaces/${workspace.id}/email-templates`, { name, subject, bodyMarkdown: body });
-    setName(''); setSubject(''); setBody('');
-    await load();
-  };
-
-  const remove = async (id: string) => {
-    if (!workspace) return;
-    await api.del(`/workspaces/${workspace.id}/email-templates/${id}`);
-    await load();
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.del(`/workspaces/${wsId}/email-templates/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.templates(wsId ?? '') }),
+  });
 
   return (
     <>
@@ -72,8 +73,8 @@ export function TemplatesPage() {
                 placeholder="Hi {{fullName}}, ..."
               />
             </div>
-            <Button onClick={create} className="w-full">
-              <Plus size={16} /> Create
+            <Button onClick={() => createMutation.mutate()} className="w-full" disabled={createMutation.isPending || !name.trim()}>
+              <Plus size={16} /> {createMutation.isPending ? 'Creating…' : 'Create'}
             </Button>
           </CardContent>
         </Card>
@@ -87,7 +88,7 @@ export function TemplatesPage() {
                     <div className="text-base font-semibold">{t.name}</div>
                     <div className="text-sm text-muted-foreground">{t.subject}</div>
                   </div>
-                  <Button size="icon" variant="ghost" onClick={() => remove(t.id)}>
+                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(t.id)}>
                     <Trash2 size={16} />
                   </Button>
                 </div>

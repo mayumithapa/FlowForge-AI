@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Activity, CheckCircle2, Mail, TrendingUp, Users, Workflow as WorkflowIcon, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
@@ -28,22 +29,23 @@ interface TimeseriesPoint {
 
 export function DashboardPage() {
   const { workspace } = useAuthStore();
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [series, setSeries] = useState<TimeseriesPoint[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const wsId = workspace?.id;
 
-  useEffect(() => {
-    if (!workspace) return;
-    Promise.all([
-      api.get<Summary>(`/workspaces/${workspace.id}/analytics/summary`),
-      api.get<TimeseriesPoint[]>(`/workspaces/${workspace.id}/analytics/executions?days=14`),
-    ])
-      .then(([s, t]) => {
-        setSummary(s);
-        setSeries(t);
-      })
-      .catch((err) => setError(err.message));
-  }, [workspace]);
+  const summaryQ = useQuery({
+    queryKey: qk.analyticsSummary(wsId ?? ''),
+    queryFn: () => api.get<Summary>(`/workspaces/${wsId}/analytics/summary`),
+    enabled: !!wsId,
+  });
+
+  const seriesQ = useQuery({
+    queryKey: qk.analyticsExecutions(wsId ?? '', 14),
+    queryFn: () => api.get<TimeseriesPoint[]>(`/workspaces/${wsId}/analytics/executions?days=14`),
+    enabled: !!wsId,
+  });
+
+  const summary = summaryQ.data;
+  const series = seriesQ.data ?? [];
+  const error = summaryQ.error ?? seriesQ.error;
 
   const tiles = [
     { title: 'Total leads', value: summary?.totalLeads ?? '—', icon: Users, sub: `${summary?.newLeadsToday ?? 0} new today` },
@@ -58,7 +60,7 @@ export function DashboardPage() {
     <>
       <PageHeader title="Dashboard" description={workspace?.name ?? 'Overview of your workspace.'} />
       <div className="p-8">
-        {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+        {error && <p className="mb-4 text-sm text-destructive">{(error as Error).message}</p>}
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {tiles.map((t) => (

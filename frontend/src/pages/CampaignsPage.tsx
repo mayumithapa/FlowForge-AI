@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { Plus, Rocket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 import { relativeTime } from '@/lib/utils';
 
@@ -25,59 +27,66 @@ interface Campaign {
 }
 
 export function CampaignsPage() {
+  const qc = useQueryClient();
   const { workspace } = useAuthStore();
-  const [items, setItems] = useState<Campaign[]>([]);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const wsId = workspace?.id;
+
   const [name, setName] = useState('');
   const [workflowId, setWorkflowId] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [leadIds, setLeadIds] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!workspace) return;
-    const [c, w, t] = await Promise.all([
-      api.get<Campaign[]>(`/workspaces/${workspace.id}/campaigns`),
-      api.get<Workflow[]>(`/workspaces/${workspace.id}/workflows`),
-      api.get<Template[]>(`/workspaces/${workspace.id}/email-templates`),
-    ]);
-    setItems(c);
-    setWorkflows(w.filter((x) => x.publishedVersionId));
-    setTemplates(t);
-  };
+  // Parallel fetch of campaigns + workflows + templates in one shot.
+  const results = useQueries({
+    queries: [
+      {
+        queryKey: qk.campaigns(wsId ?? ''),
+        queryFn: () => api.get<Campaign[]>(`/workspaces/${wsId}/campaigns`),
+        enabled: !!wsId,
+      },
+      {
+        queryKey: qk.workflows(wsId ?? ''),
+        queryFn: () => api.get<Workflow[]>(`/workspaces/${wsId}/workflows`),
+        enabled: !!wsId,
+      },
+      {
+        queryKey: qk.templates(wsId ?? ''),
+        queryFn: () => api.get<Template[]>(`/workspaces/${wsId}/email-templates`),
+        enabled: !!wsId,
+      },
+    ],
+  });
+  const items = (results[0].data ?? []) as Campaign[];
+  const workflows = ((results[1].data ?? []) as Workflow[]).filter((w) => w.publishedVersionId);
+  const templates = (results[2].data ?? []) as Template[];
 
-  useEffect(() => {
-    load();
-  }, [workspace]);
+  const createMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/workspaces/${wsId}/campaigns`, {
+        name,
+        workflowId: workflowId || undefined,
+        templateId: templateId || undefined,
+      }),
+    onSuccess: () => {
+      setName(''); setWorkflowId(''); setTemplateId('');
+      qc.invalidateQueries({ queryKey: qk.campaigns(wsId ?? '') });
+    },
+  });
 
-  const create = async () => {
-    if (!workspace || !name.trim()) return;
-    await api.post(`/workspaces/${workspace.id}/campaigns`, {
-      name,
-      workflowId: workflowId || undefined,
-      templateId: templateId || undefined,
-    });
-    setName(''); setWorkflowId(''); setTemplateId('');
-    await load();
-  };
-
-  const launch = async (id: string) => {
-    if (!workspace) return;
-    const ids = leadIds.split(/[,\s]+/).filter(Boolean);
-    if (ids.length === 0) {
-      setMessage('Paste lead UUIDs (comma separated) to launch.');
-      return;
-    }
-    setMessage(null);
-    try {
-      const r = await api.post<{ launched: number }>(`/workspaces/${workspace.id}/campaigns/${id}/launch`, { leadIds: ids });
+  const launchMutation = useMutation({
+    mutationFn: (id: string) => {
+      const ids = leadIds.split(/[,\s]+/).filter(Boolean);
+      if (ids.length === 0) throw new Error('Paste lead UUIDs (comma separated) to launch.');
+      return api.post<{ launched: number }>(`/workspaces/${wsId}/campaigns/${id}/launch`, { leadIds: ids });
+    },
+    onSuccess: (r) => {
       setMessage(`Campaign launched for ${r.launched} leads.`);
-      await load();
-    } catch (err) {
-      setMessage((err as Error).message);
-    }
-  };
+      qc.invalidateQueries({ queryKey: qk.campaigns(wsId ?? '') });
+      qc.invalidateQueries({ queryKey: qk.analyticsSummary(wsId ?? '') });
+    },
+    onError: (err) => setMessage((err as Error).message),
+  });
 
   return (
     <>
@@ -122,8 +131,8 @@ export function CampaignsPage() {
                 ))}
               </select>
             </div>
-            <Button onClick={create} className="w-full">
-              <Plus size={16} /> Create
+            <Button onClick={() => createMutation.mutate()} className="w-full" disabled={createMutation.isPending || !name.trim()}>
+              <Plus size={16} /> {createMutation.isPending ? 'Creating…' : 'Create'}
             </Button>
           </CardContent>
         </Card>
@@ -151,8 +160,8 @@ export function CampaignsPage() {
                     {c.totalRecipients} recipients · {c.totalSent} sent · {c.totalOpened} opened · {relativeTime(c.createdAt)}
                   </div>
                 </div>
-                <Button onClick={() => launch(c.id)} disabled={!c.workflowId}>
-                  <Rocket size={16} /> Launch
+                <Button onClick={() => launchMutation.mutate(c.id)} disabled={!c.workflowId || launchMutation.isPending}>
+                  <Rocket size={16} /> {launchMutation.isPending ? 'Launching…' : 'Launch'}
                 </Button>
               </CardContent>
             </Card>

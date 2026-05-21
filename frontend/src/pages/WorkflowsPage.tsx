@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query-client';
 import { useAuthStore } from '@/stores/auth';
 import { relativeTime } from '@/lib/utils';
 
@@ -21,30 +23,29 @@ interface Workflow {
 
 export function WorkflowsPage() {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const { workspace } = useAuthStore();
-  const [items, setItems] = useState<Workflow[]>([]);
+  const wsId = workspace?.id;
   const [name, setName] = useState('');
-  const [creating, setCreating] = useState(false);
 
-  const load = async () => {
-    if (!workspace) return;
-    const list = await api.get<Workflow[]>(`/workspaces/${workspace.id}/workflows`);
-    setItems(list);
-  };
+  const { data: items = [] } = useQuery({
+    queryKey: qk.workflows(wsId ?? ''),
+    queryFn: () => api.get<Workflow[]>(`/workspaces/${wsId}/workflows`),
+    enabled: !!wsId,
+  });
 
-  useEffect(() => {
-    load();
-  }, [workspace]);
-
-  const create = async () => {
-    if (!workspace || !name.trim()) return;
-    setCreating(true);
-    try {
-      const wf = await api.post<Workflow>(`/workspaces/${workspace.id}/workflows`, { name });
+  const createMutation = useMutation({
+    mutationFn: (workflowName: string) =>
+      api.post<Workflow>(`/workspaces/${wsId}/workflows`, { name: workflowName }),
+    onSuccess: (wf) => {
+      qc.invalidateQueries({ queryKey: qk.workflows(wsId ?? '') });
       nav(`/workflows/${wf.id}`);
-    } finally {
-      setCreating(false);
-    }
+    },
+  });
+
+  const handleCreate = () => {
+    if (!name.trim()) return;
+    createMutation.mutate(name);
   };
 
   return (
@@ -54,8 +55,8 @@ export function WorkflowsPage() {
         <Card>
           <CardContent className="flex gap-2 p-4">
             <Input placeholder="New workflow name…" value={name} onChange={(e) => setName(e.target.value)} />
-            <Button onClick={create} disabled={creating || !name.trim()}>
-              <Plus size={16} /> Create
+            <Button onClick={handleCreate} disabled={createMutation.isPending || !name.trim()}>
+              <Plus size={16} /> {createMutation.isPending ? 'Creating…' : 'Create'}
             </Button>
           </CardContent>
         </Card>
