@@ -45,6 +45,8 @@ export class AiService {
   private readonly client: OpenAI | null;
   private readonly model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   private readonly rateLimit = parseInt(process.env.AI_RATE_LIMIT_PER_MIN || '60', 10);
+  // json_object mode is OpenAI-native; Grok & other providers use prompt-based JSON instead.
+  private readonly useJsonMode = !process.env.AI_BASE_URL;
 
   constructor(private readonly prisma: PrismaService, private readonly redis: RedisService) {
     const key = process.env.OPENAI_API_KEY;
@@ -112,9 +114,9 @@ export class AiService {
         const response = await this.client!.chat.completions.create({
           model: this.model,
           temperature: 0.4,
-          response_format: { type: 'json_object' },
+          ...(this.useJsonMode ? { response_format: { type: 'json_object' } } : {}),
           messages: [
-            { role: 'system', content: system },
+            { role: 'system', content: `${system}\nAlways respond with valid JSON only. No markdown, no explanation.` },
             { role: 'user', content: user },
           ],
         });
