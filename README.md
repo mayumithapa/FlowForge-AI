@@ -17,17 +17,18 @@
 
 ## 🚀 Overview
 
-FlowForge AI is a full-stack SaaS platform that lets you build visual AI workflows to automate lead classification, personalized email generation, and multi-channel campaign management — all powered by OpenAI.
+FlowForge AI is a full-stack SaaS platform that lets you build visual AI workflows to automate lead classification, personalized email generation, and multi-channel campaign management — powered by any OpenAI-compatible LLM provider.
 
 ### ✨ Key Features
 
 - **🎨 Visual Workflow Builder** — Drag-and-drop node editor (React Flow) with AI, email, logic, and data nodes
-- **🤖 AI Nodes** — Classify leads, generate personalized emails, analyze sentiment, summarize content via OpenAI GPT-4o-mini
+- **🤖 AI Nodes** — Classify leads, generate personalized emails, analyze sentiment, summarize content
+- **🔌 Provider-agnostic AI** — Works with any OpenAI-compatible API (OpenAI, Groq, Gemini, OpenRouter) via a single `AI_BASE_URL` env var
 - **📋 Lead Management** — CSV import with bulk workflow trigger, search, and AI enrichment
 - **📧 Email Campaigns** — Fan-out campaigns to lead segments with delivery tracking
 - **📊 Analytics Dashboard** — Real-time execution health, queue depth, and 30-day trend charts
 - **🔐 Multi-tenant Auth** — JWT + refresh token auth with workspace isolation
-- **⚙️ Offline Mock Mode** — Full demo without an OpenAI API key
+- **🚦 Async + Resilient** — RabbitMQ queues with dead-letter exchange, exponential-backoff retries, and idempotency keys
 
 ---
 
@@ -56,7 +57,7 @@ FlowForge AI is a full-stack SaaS platform that lets you build visual AI workflo
 | Database | PostgreSQL 16 |
 | Cache | Redis 7 |
 | Queue | RabbitMQ 3.13 |
-| AI | OpenAI GPT-4o-mini (with offline mock fallback) |
+| AI | OpenAI-compatible API (Groq · OpenAI · Gemini · OpenRouter) — configured via `AI_BASE_URL` |
 | Infrastructure | Docker Compose, Nginx |
 
 ---
@@ -75,11 +76,30 @@ cd FlowForge-AI
 cp .env.example .env
 ```
 
-Edit `.env` and set your values:
+Edit `.env` and set your values. The AI layer speaks the OpenAI Chat Completions protocol, so any compatible provider works — pick one:
+
 ```env
-OPENAI_API_KEY=sk-your-key-here   # or leave as sk-replace-me for offline mock
-JWT_SECRET=your-secret-here
+# --- Option A: Groq (free, fast — recommended) -----------------------------
+OPENAI_API_KEY=gsk_your_groq_key_here
+AI_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_MODEL=llama-3.3-70b-versatile
+
+# --- Option B: OpenAI ------------------------------------------------------
+# OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o-mini
+# (leave AI_BASE_URL unset)
+
+# --- Option C: Google Gemini (OpenAI-compatible endpoint) -------------------
+# OPENAI_API_KEY=AIza...
+# AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+# OPENAI_MODEL=gemini-2.0-flash
+
+# --- Required for auth -----------------------------------------------------
+JWT_ACCESS_SECRET=change-me-access
+JWT_REFRESH_SECRET=change-me-refresh
 ```
+
+> Get a free Groq API key in 30 seconds at https://console.groq.com/keys — no credit card required.
 
 ### 2. Start all services
 
@@ -99,7 +119,7 @@ docker compose -f docker/docker-compose.yml exec backend npx prisma db seed
 |---------|-----|
 | Frontend | http://localhost:5173 |
 | Backend API | http://localhost:4000/api |
-| Swagger Docs | http://localhost:4000/docs |
+| Swagger Docs | http://localhost:4000/api/docs |
 | RabbitMQ UI | http://localhost:15672 |
 
 **Demo credentials:**
@@ -132,7 +152,7 @@ docker compose -f docker/docker-compose.yml exec backend npx prisma db seed
 FlowForge-AI/
 ├── backend/          # NestJS API server
 │   ├── src/
-│   │   ├── ai/           # OpenAI integration + offline mocks
+│   │   ├── ai/           # Provider-agnostic AI client (Groq, OpenAI, Gemini, …)
 │   │   ├── auth/         # JWT auth, guards, decorators
 │   │   ├── campaign/     # Campaign management
 │   │   ├── leads/        # Lead CRUD + CSV import
