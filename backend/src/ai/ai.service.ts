@@ -142,11 +142,13 @@ export class AiService {
         return parsed;
       } catch (err) {
         lastErr = err;
-        const e = err as { status?: number; message?: string };
+        const e = err as { status?: number; message?: string; error?: unknown };
+        // Log full error so we can diagnose provider-specific issues
+        this.logger.error(`AI ${op} attempt ${attempt} error [${e.status ?? '?'}]: ${e.message ?? JSON.stringify(e)}`);
         const retryable = !e.status || e.status >= 500 || e.status === 429;
         if (!retryable || attempt >= maxAttempts) break;
         const backoff = 250 * 2 ** attempt;
-        this.logger.warn(`AI ${op} attempt ${attempt} failed (${e.status ?? '?'}); retry in ${backoff}ms`);
+        this.logger.warn(`Retrying in ${backoff}ms...`);
         await new Promise((r) => setTimeout(r, backoff));
       }
     }
