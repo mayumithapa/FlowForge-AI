@@ -17,6 +17,7 @@
     "ioredis": "^5.4.1",
     "openai": "^4.55.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^4.0.0",
     "rxjs": "^7.8.1",
     "uuid": "^10.0.0"
   },

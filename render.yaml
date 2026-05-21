@@ -64,6 +64,10 @@ services:
         value: 60
       - key: WORKER_CONCURRENCY
         value: 5
+      - key: RESEND_API_KEY
+        sync: false   # set manually in dashboard
+      - key: EMAIL_FROM
+        value: FlowForge AI <onboarding@resend.dev>
 
 # ── PostgreSQL Database ─────────────────────────────────────────────────────────
 databases:
