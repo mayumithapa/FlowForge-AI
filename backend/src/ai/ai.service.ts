@@ -31,41 +31,39 @@ export interface GeneratedEmail {
  * AiService
  * =========
  *
- * Thin facade over the OpenAI SDK with:
+ * Thin facade over the OpenAI-compatible SDK with:
  *   - centralized prompt templates (./prompts)
  *   - per-workspace rate limiting via Redis
  *   - exponential-backoff retries on 429/5xx
- *   - structured JSON responses (response_format: json_object)
+ *   - structured JSON responses via prompt instruction
  *   - JobLog token tracking
- *   - graceful offline mode for local dev when no API key is provided
+ *   - throws a clear error if OPENAI_API_KEY is not configured
  */
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly client: OpenAI | null;
+  private readonly client: OpenAI;
   private readonly model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   private readonly rateLimit = parseInt(process.env.AI_RATE_LIMIT_PER_MIN || '60', 10);
-  // json_object mode is OpenAI-native; Grok & other providers use prompt-based JSON instead.
+  // json_object mode is OpenAI-native; Groq & other providers use prompt-based JSON instead.
   private readonly useJsonMode = !process.env.AI_BASE_URL;
 
   constructor(private readonly prisma: PrismaService, private readonly redis: RedisService) {
     const key = process.env.OPENAI_API_KEY;
-    const baseURL = process.env.AI_BASE_URL; // e.g. https://api.x.ai/v1 for Grok
-    this.client = key && key !== 'sk-replace-me'
-      ? new OpenAI({ apiKey: key, ...(baseURL ? { baseURL } : {}) })
-      : null;
-    if (!this.client) {
-      this.logger.warn('OPENAI_API_KEY not set; AI service is running in OFFLINE MOCK mode');
-    } else {
-      this.logger.log(`AI client ready (baseURL: ${baseURL ?? 'https://api.openai.com/v1'})`);
+    const baseURL = process.env.AI_BASE_URL;
+
+    if (!key) {
+      throw new Error('OPENAI_API_KEY environment variable is not set. AI service cannot start.');
     }
+
+    this.client = new OpenAI({ apiKey: key, ...(baseURL ? { baseURL } : {}) });
+    this.logger.log(`AI client ready — model: ${this.model}, baseURL: ${baseURL ?? 'https://api.openai.com/v1'}`);
   }
 
   // --------------------------------------------------------------------------
   // Public AI primitives
   // --------------------------------------------------------------------------
   async classify(workspaceId: string, text: string, categories: string[]): Promise<ClassifyResult> {
-    if (!this.client) return this.mockClassify(text, categories);
     const { system, user } = PROMPTS.classify(text, categories);
     const result = await this.invoke<ClassifyResult>(workspaceId, 'classify', system, user);
     return {
@@ -76,13 +74,11 @@ export class AiService {
   }
 
   async sentiment(workspaceId: string, text: string): Promise<SentimentResult> {
-    if (!this.client) return this.mockSentiment(text);
     const { system, user } = PROMPTS.sentiment(text);
     return this.invoke<SentimentResult>(workspaceId, 'sentiment', system, user);
   }
 
   async summarize(workspaceId: string, text: string, maxWords = 60): Promise<SummaryResult> {
-    if (!this.client) return { summary: text.split(/\s+/).slice(0, maxWords).join(' ') };
     const { system, user } = PROMPTS.summarize(text, maxWords);
     return this.invoke<SummaryResult>(workspaceId, 'summarize', system, user);
   }
@@ -91,7 +87,6 @@ export class AiService {
     workspaceId: string,
     params: { tone: string; goal: string; recipientName?: string; recipientCompany?: string; context?: unknown },
   ): Promise<GeneratedEmail> {
-    if (!this.client) return this.mockEmail(params);
     const { system, user } = PROMPTS.generateEmail(params);
     return this.invoke<GeneratedEmail>(workspaceId, 'generateEmail', system, user);
   }
@@ -111,7 +106,7 @@ export class AiService {
     while (attempt < maxAttempts) {
       attempt++;
       try {
-        const response = await this.client!.chat.completions.create({
+        const response = await this.client.chat.completions.create({
           model: this.model,
           temperature: 0.4,
           ...(this.useJsonMode ? { response_format: { type: 'json_object' } } : {}),
@@ -143,7 +138,6 @@ export class AiService {
       } catch (err) {
         lastErr = err;
         const e = err as { status?: number; message?: string; error?: unknown };
-        // Log full error so we can diagnose provider-specific issues
         this.logger.error(`AI ${op} attempt ${attempt} error [${e.status ?? '?'}]: ${e.message ?? JSON.stringify(e)}`);
         const retryable = !e.status || e.status >= 500 || e.status === 429;
         if (!retryable || attempt >= maxAttempts) break;
@@ -166,33 +160,5 @@ export class AiService {
       },
     });
     throw new ServiceUnavailableException(`AI ${op} failed after ${attempt} attempts`);
-  }
-
-  // --------------------------------------------------------------------------
-  // Offline mocks (so MVP demo works without an API key)
-  // --------------------------------------------------------------------------
-  private mockClassify(text: string, categories: string[]): ClassifyResult {
-    const hash = [...text].reduce((a, c) => a + c.charCodeAt(0), 0);
-    return { category: categories[hash % categories.length], confidence: 0.7, reason: 'offline mock' };
-  }
-  private mockSentiment(text: string): SentimentResult {
-    const negWords = ['bad', 'angry', 'cancel', 'refund', 'not'];
-    const posWords = ['great', 'love', 'amazing', 'happy', 'thanks'];
-    let score = 0;
-    for (const w of negWords) if (text.toLowerCase().includes(w)) score -= 0.3;
-    for (const w of posWords) if (text.toLowerCase().includes(w)) score += 0.3;
-    score = Math.max(-1, Math.min(1, score));
-    const sentiment = score > 0.1 ? 'positive' : score < -0.1 ? 'negative' : 'neutral';
-    return { sentiment, score, reason: 'offline mock' };
-  }
-  private mockEmail(params: { recipientName?: string; recipientCompany?: string; goal: string; tone: string }): GeneratedEmail {
-    const name = params.recipientName || 'there';
-    const subject = `Quick idea for ${params.recipientCompany || 'your team'}`;
-    const bodyText = `Hi ${name},\n\nI'm reaching out because we help teams like yours ${params.goal}. Would you be open to a short conversation this week?\n\n— FlowForge AI (${params.tone} offline mock)`;
-    return {
-      subject,
-      bodyHtml: `<p>Hi ${name},</p><p>I'm reaching out because we help teams like yours ${params.goal}. Would you be open to a short conversation this week?</p><p>— FlowForge AI</p>`,
-      bodyText,
-    };
   }
 }
