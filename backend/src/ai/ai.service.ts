@@ -48,9 +48,14 @@ export class AiService {
 
   constructor(private readonly prisma: PrismaService, private readonly redis: RedisService) {
     const key = process.env.OPENAI_API_KEY;
-    this.client = key && key !== 'sk-replace-me' ? new OpenAI({ apiKey: key }) : null;
+    const baseURL = process.env.AI_BASE_URL; // e.g. https://api.x.ai/v1 for Grok
+    this.client = key && key !== 'sk-replace-me'
+      ? new OpenAI({ apiKey: key, ...(baseURL ? { baseURL } : {}) })
+      : null;
     if (!this.client) {
       this.logger.warn('OPENAI_API_KEY not set; AI service is running in OFFLINE MOCK mode');
+    } else {
+      this.logger.log(`AI client ready (baseURL: ${baseURL ?? 'https://api.openai.com/v1'})`);
     }
   }
 

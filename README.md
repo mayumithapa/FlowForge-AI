@@ -6,6 +6,15 @@
 ![Stack](https://img.shields.io/badge/Stack-NestJS%20%7C%20React%20%7C%20PostgreSQL%20%7C%20RabbitMQ-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
+### 🌐 Live Demo
+| | URL |
+|--|-----|
+| **Frontend** | https://flowforge-ai-psi.vercel.app |
+| **Backend API** | https://flowforge-backend.onrender.com/api |
+
+> ⚠️ Free tier — backend may take ~30s to wake up on first request.
+
+
 ## 🚀 Overview
 
 FlowForge AI is a full-stack SaaS platform that lets you build visual AI workflows to automate lead classification, personalized email generation, and multi-channel campaign management — all powered by OpenAI.
