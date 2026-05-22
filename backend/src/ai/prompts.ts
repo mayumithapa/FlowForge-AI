@@ -35,6 +35,8 @@ export const PROMPTS = {
     goal: string;
     recipientName?: string;
     recipientCompany?: string;
+    senderName?: string;
+    senderCompany?: string;
     context?: unknown;
   }) {
     return {
@@ -45,6 +47,8 @@ export const PROMPTS = {
         `Goal: ${params.goal}`,
         params.recipientName ? `Recipient name: ${params.recipientName}` : '',
         params.recipientCompany ? `Recipient company: ${params.recipientCompany}` : '',
+        params.senderName ? `Sender name: ${params.senderName}` : '',
+        params.senderCompany ? `Sender company (sign the email with this): ${params.senderCompany}` : '',
         params.context ? `Context: ${JSON.stringify(params.context).slice(0, 1500)}` : '',
       ]
         .filter(Boolean)

@@ -85,7 +85,7 @@ export class AiService {
 
   async generateEmail(
     workspaceId: string,
-    params: { tone: string; goal: string; recipientName?: string; recipientCompany?: string; context?: unknown },
+    params: { tone: string; goal: string; recipientName?: string; recipientCompany?: string; senderName?: string; senderCompany?: string; context?: unknown },
   ): Promise<GeneratedEmail> {
     const { system, user } = PROMPTS.generateEmail(params);
     return this.invoke<GeneratedEmail>(workspaceId, 'generateEmail', system, user);

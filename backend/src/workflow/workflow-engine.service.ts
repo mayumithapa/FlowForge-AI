@@ -202,11 +202,17 @@ export class WorkflowEngineService {
         const tone = String(cfg.tone ?? 'professional');
         const goal = String(cfg.goal ?? 'introduce our product');
         const lead = (input as { lead?: Record<string, unknown>; leadId?: string; fullName?: string; company?: string; email?: string });
+        // Fetch workspace name to use as sender signature
+        const ws = await this.prisma.workspace.findUnique({
+          where: { id: execution.workspaceId },
+          select: { name: true },
+        });
         return this.ai.generateEmail(execution.workspaceId, {
           tone,
           goal,
           recipientName: String(lead.fullName ?? ''),
           recipientCompany: String(lead.company ?? ''),
+          senderCompany: ws?.name ?? undefined,
           context: input,
         }) as unknown as Record<string, unknown>;
       }
