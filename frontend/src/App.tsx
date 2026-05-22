@@ -11,6 +11,7 @@ import { CampaignsPage } from '@/pages/CampaignsPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { HostedFormPage } from '@/pages/HostedFormPage';
+import { SentEmailsPage } from '@/pages/SentEmailsPage';
 import { useAuthStore } from '@/stores/auth';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/emails" element={<SentEmailsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

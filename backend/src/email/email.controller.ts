@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -44,8 +44,14 @@ export class EmailController {
   }
 
   @Get('emails')
-  listMessages(@CurrentUser() u: AuthUser, @Param('workspaceId') ws: string) {
-    return this.email.listMessages(u.id, ws);
+  listMessages(
+    @CurrentUser() u: AuthUser,
+    @Param('workspaceId') ws: string,
+    @Query('status') status?: string,
+  ) {
+    return this.email.listMessages(u.id, ws, {
+      status: status as any,
+    });
   }
 
   @Get('emails/:id')

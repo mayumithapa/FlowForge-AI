@@ -4,6 +4,7 @@ import {
   Workflow,
   BarChart3,
   Mail,
+  Inbox,
   Megaphone,
   Settings,
   Users,
@@ -19,6 +20,7 @@ const links = [
   { to: '/leads', icon: Users, label: 'Leads' },
   { to: '/templates', icon: Mail, label: 'Templates' },
   { to: '/campaigns', icon: Megaphone, label: 'Campaigns' },
+  { to: '/emails', icon: Inbox, label: 'Sent Emails' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

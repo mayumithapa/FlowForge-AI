@@ -73,12 +73,18 @@ export class EmailService {
     return message;
   }
 
-  async listMessages(userId: string, workspaceId: string) {
+  async listMessages(userId: string, workspaceId: string, opts?: { status?: EmailStatus; take?: number }) {
     await this.workspaces.assertMember(userId, workspaceId);
     return this.prisma.emailMessage.findMany({
-      where: { workspaceId },
+      where: {
+        workspaceId,
+        ...(opts?.status ? { status: opts.status } : {}),
+      },
       orderBy: { createdAt: 'desc' },
-      take: 100,
+      take: opts?.take ?? 200,
+      include: {
+        lead: { select: { id: true, fullName: true, email: true, company: true } },
+      },
     });
   }
 
