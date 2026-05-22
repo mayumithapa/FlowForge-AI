@@ -37,5 +37,7 @@ COPY --from=builder /repo/backend/tsconfig.json ./tsconfig.json
 
 EXPOSE 4000
 
-# Sync schema to the database on every boot (no migration files needed).
-CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main.js"]
+# Mark the baseline migration as already applied (tables already exist via db push).
+# --applied is idempotent — safe to run on every boot.
+# Then deploy any new migrations (e.g. WorkspaceInvite) that aren't yet applied.
+CMD ["sh", "-c", "npx prisma migrate resolve --applied 20260521000000_baseline 2>/dev/null || true && npx prisma migrate deploy && node dist/main.js"]
