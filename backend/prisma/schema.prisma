@@ -152,6 +152,15 @@ model Workflow {
   status         WorkflowStatus @default(DRAFT)
   publishedVersionId String?    @db.Uuid
 
+  // Webhook trigger surface. Generated only when the workflow's published
+  // graph contains a TRIGGER_WEBHOOK node. Stable across edits so customers
+  // never have to update the URL embedded on their site.
+  webhookToken   String?        @unique
+  webhookSecret  String?
+  // Optional field schema for the embeddable form widget. Shape:
+  // [{ key: "email", label: "Email", type: "email", required: true }, ...]
+  webhookFields  Json?
+
   workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   versions       WorkflowVersion[] @relation("WorkflowVersions")
   publishedVersion WorkflowVersion? @relation("PublishedVersion", fields: [publishedVersionId], references: [id])

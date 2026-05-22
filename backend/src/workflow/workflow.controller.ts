@@ -81,4 +81,17 @@ export class WorkflowController {
   ) {
     return this.workflows.getExecution(u.id, ws, executionId);
   }
+
+  /**
+   * Rotate the HMAC signing secret. Public token stays the same so the URL
+   * embedded on the customer's site keeps working.
+   */
+  @Post(':id/webhook/rotate-secret')
+  rotateWebhookSecret(
+    @CurrentUser() u: AuthUser,
+    @Param('workspaceId') ws: string,
+    @Param('id') id: string,
+  ) {
+    return this.workflows.rotateWebhookSecret(u.id, ws, id);
+  }
 }

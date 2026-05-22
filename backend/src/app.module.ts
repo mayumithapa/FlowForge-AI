@@ -18,6 +18,7 @@ import { CampaignModule } from './campaign/campaign.module';
 import { AiModule } from './ai/ai.module';
 import { QueueModule } from './queue/queue.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     AiModule,
     QueueModule,
     AnalyticsModule,
+    WebhooksModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -10,6 +10,7 @@ import { TemplatesPage } from '@/pages/TemplatesPage';
 import { CampaignsPage } from '@/pages/CampaignsPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { HostedFormPage } from '@/pages/HostedFormPage';
 import { useAuthStore } from '@/stores/auth';
 
 export default function App() {
@@ -19,6 +20,9 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+
+      {/* Public hosted forms — no auth, no AppShell chrome */}
+      <Route path="/f/:token" element={<HostedFormPage />} />
 
       <Route element={<AppShell />}>
         <Route path="/dashboard" element={<DashboardPage />} />

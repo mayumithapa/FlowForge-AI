@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
 import { ROUTING_KEYS } from '../rabbitmq/rabbitmq.constants';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import {
   CreateWorkflowDto,
   RunWorkflowDto,
@@ -21,6 +22,7 @@ export class WorkflowService {
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspaceService,
     private readonly mq: RabbitMQService,
+    private readonly webhooks: WebhooksService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -85,6 +87,8 @@ export class WorkflowService {
     await this.workspaces.assertMember(userId, workspaceId);
     this.validateGraph(dto.graph);
 
+    const hasWebhookTrigger = dto.graph.nodes.some((n) => n.type === NodeType.TRIGGER_WEBHOOK);
+
     return this.prisma.$transaction(async (tx) => {
       const last = await tx.workflowVersion.findFirst({
         where: { workflowId: id },
@@ -116,15 +120,49 @@ export class WorkflowService {
         },
       });
 
+      const workflowUpdate: Prisma.WorkflowUpdateInput = {};
       if (dto.publish) {
-        await tx.workflow.update({
+        workflowUpdate.publishedVersion = { connect: { id: version.id } };
+        workflowUpdate.status = WorkflowStatus.ACTIVE;
+      }
+
+      // Mint webhook credentials lazily: only when a TRIGGER_WEBHOOK node is
+      // saved, and only once per workflow. The token is stable across edits
+      // so customers never have to update the URL embedded on their site.
+      if (hasWebhookTrigger) {
+        const current = await tx.workflow.findUnique({
           where: { id },
-          data: { publishedVersionId: version.id, status: WorkflowStatus.ACTIVE },
+          select: { webhookToken: true, webhookFields: true },
         });
+        if (!current?.webhookToken) {
+          const creds = this.webhooks.generateCredentials();
+          workflowUpdate.webhookToken = creds.webhookToken;
+          workflowUpdate.webhookSecret = creds.webhookSecret;
+          workflowUpdate.webhookFields = creds.webhookFields as Prisma.InputJsonValue;
+        }
+      }
+
+      if (Object.keys(workflowUpdate).length > 0) {
+        await tx.workflow.update({ where: { id }, data: workflowUpdate });
       }
 
       return version;
     });
+  }
+
+  /**
+   * Rotate the webhook secret without changing the public token. Useful when
+   * the secret leaks (logged accidentally, committed to a repo, etc.).
+   */
+  async rotateWebhookSecret(userId: string, workspaceId: string, id: string) {
+    await this.workspaces.assertMember(userId, workspaceId);
+    const creds = this.webhooks.generateCredentials();
+    const updated = await this.prisma.workflow.update({
+      where: { id },
+      data: { webhookSecret: creds.webhookSecret },
+      select: { webhookToken: true, webhookSecret: true },
+    });
+    return updated;
   }
 
   // --------------------------------------------------------------------------

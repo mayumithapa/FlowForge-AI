@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
+import { WebhookInspector } from '@/components/workflow/WebhookInspector';
 import {
   Bot,
   Brain,
@@ -65,8 +66,10 @@ interface WorkflowData {
   name: string;
   status: string;
   publishedVersionId: string | null;
+  webhookToken: string | null;
+  webhookSecret: string | null;
   versions: { id: string; version: number; nodes: any[]; edges: any[] }[];
-  publishedVersion: { id: string; nodes: any[]; edges: any[] } | null;
+  publishedVersion: { id: string; nodes: { type: string }[]; edges: any[] } | null;
 }
 
 function FlowNode({ data, selected }: NodeProps) {
@@ -275,7 +278,20 @@ export function WorkflowBuilderPage() {
             <div className="space-y-3">
               <div className="text-sm font-semibold">{selected.data.type}</div>
               <div className="text-xs text-muted-foreground">{selected.id}</div>
-              {Object.keys(selected.data.config ?? {}).length === 0 && (
+
+              {selected.data.type === 'TRIGGER_WEBHOOK' && workspace && workflow && (
+                <WebhookInspector
+                  workspaceId={workspace.id}
+                  workflowId={workflow.id}
+                  webhookToken={workflow.webhookToken}
+                  webhookSecret={workflow.webhookSecret}
+                  publishedHasWebhook={Boolean(
+                    workflow.publishedVersion?.nodes?.some((n) => n.type === 'TRIGGER_WEBHOOK'),
+                  )}
+                />
+              )}
+
+              {Object.keys(selected.data.config ?? {}).length === 0 && selected.data.type !== 'TRIGGER_WEBHOOK' && (
                 <p className="text-xs text-muted-foreground">This node has no configurable fields.</p>
               )}
               {Object.entries(selected.data.config ?? {}).map(([k, v]) => (
