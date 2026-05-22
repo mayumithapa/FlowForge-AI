@@ -40,4 +40,4 @@ EXPOSE 4000
 # Mark the baseline migration as already applied (tables already exist via db push).
 # --applied is idempotent — safe to run on every boot.
 # Then deploy any new migrations (e.g. WorkspaceInvite) that aren't yet applied.
-CMD ["sh", "-c", "npx prisma migrate resolve --applied 20260521000000_baseline 2>/dev/null || true && npx prisma migrate deploy && node dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate resolve --applied 20260521000000_baseline 2>/dev/null || true && npx prisma migrate resolve --applied 20260522000001_add_workspace_invites 2>/dev/null || true && npx prisma migrate deploy && node dist/main.js"]
