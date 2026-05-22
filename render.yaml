@@ -29,9 +29,11 @@ services:
       - key: JWT_REFRESH_TTL
         value: 2592000
       - key: OPENAI_API_KEY
-        sync: false   # set manually in dashboard
+        sync: false   # set manually in dashboard (Groq key when AI_BASE_URL points to Groq)
       - key: OPENAI_MODEL
-        value: gpt-4o-mini
+        value: llama-3.3-70b-versatile   # Groq model; switch to e.g. "gpt-4o-mini" only if using OpenAI directly
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1   # remove / unset to use OpenAI directly
       - key: AI_RATE_LIMIT_PER_MIN
         value: 60
       - key: CORS_ORIGIN
@@ -57,9 +59,11 @@ services:
       - key: RABBITMQ_URL
         sync: false
       - key: OPENAI_API_KEY
-        sync: false
+        sync: false   # Groq key when AI_BASE_URL points to Groq
       - key: OPENAI_MODEL
-        value: gpt-4o-mini
+        value: llama-3.3-70b-versatile   # Groq model
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
       - key: AI_RATE_LIMIT_PER_MIN
         value: 60
       - key: WORKER_CONCURRENCY
