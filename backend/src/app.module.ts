@@ -19,6 +19,7 @@ import { AiModule } from './ai/ai.module';
 import { QueueModule } from './queue/queue.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { InvitesModule } from './invites/invites.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     QueueModule,
     AnalyticsModule,
     WebhooksModule,
+    InvitesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

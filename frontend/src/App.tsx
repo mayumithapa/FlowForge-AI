@@ -12,6 +12,7 @@ import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { HostedFormPage } from '@/pages/HostedFormPage';
 import { SentEmailsPage } from '@/pages/SentEmailsPage';
+import { InviteAcceptPage } from '@/pages/InviteAcceptPage';
 import { useAuthStore } from '@/stores/auth';
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
 
       {/* Public hosted forms — no auth, no AppShell chrome */}
       <Route path="/f/:token" element={<HostedFormPage />} />
+      <Route path="/invite/:token" element={<InviteAcceptPage />} />
 
       <Route element={<AppShell />}>
         <Route path="/dashboard" element={<DashboardPage />} />

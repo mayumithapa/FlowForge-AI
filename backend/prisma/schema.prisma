@@ -78,6 +78,7 @@ model Workspace {
   owner     User     @relation("WorkspaceOwner", fields: [ownerId], references: [id])
 
   members         WorkspaceMember[]
+  invites         WorkspaceInvite[]
   workflows       Workflow[]
   leads           Lead[]
   emailTemplates  EmailTemplate[]
@@ -107,6 +108,24 @@ model WorkspaceMember {
 
   @@unique([workspaceId, userId])
   @@index([userId])
+}
+
+model WorkspaceInvite {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  email       String
+  role        UserRole  @default(MEMBER)
+  token       String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([token])
+  @@index([email])
 }
 
 // ----------------------------------------------------------------------------
