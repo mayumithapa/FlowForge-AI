@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -109,16 +109,37 @@ export class WebhooksService {
       throw new BadRequestException('A valid `email` field is required.');
     }
 
-    const lead = await this.prisma.lead.create({
-      data: {
-        workspaceId: workflow.workspaceId,
-        email,
-        fullName: stringOrNull(payload.fullName ?? payload.name),
-        company: stringOrNull(payload.company),
-        source: 'webhook',
-        metadata: payload as any,
-      },
-    });
+    // Upsert: if the email already exists in this workspace, update their
+    // metadata and re-trigger the workflow (e.g. they filled the form twice).
+    // This gives a friendly experience instead of a cryptic 500 error.
+    let lead;
+    try {
+      lead = await this.prisma.lead.create({
+        data: {
+          workspaceId: workflow.workspaceId,
+          email,
+          fullName: stringOrNull(payload.fullName ?? payload.name),
+          company: stringOrNull(payload.company),
+          source: 'webhook',
+          metadata: payload as any,
+        },
+      });
+    } catch (err: any) {
+      // Prisma unique constraint violation (P2002) → email already exists
+      if (err?.code === 'P2002') {
+        lead = await this.prisma.lead.update({
+          where: { workspaceId_email: { workspaceId: workflow.workspaceId, email } },
+          data: {
+            fullName: stringOrNull(payload.fullName ?? payload.name) ?? undefined,
+            company: stringOrNull(payload.company) ?? undefined,
+            metadata: payload as any,
+          },
+        });
+        this.logger.log(`webhook ${token.slice(0, 12)}… → existing lead ${lead.id} updated`);
+      } else {
+        throw err;
+      }
+    }
 
     const execution = await this.prisma.workflowExecution.create({
       data: {
