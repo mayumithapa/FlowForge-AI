@@ -12,26 +12,54 @@ interface EmailJob {
   workspaceId: string;
 }
 
+/**
+ * Supported delivery providers.
+ *
+ * `EMAIL_PROVIDER` env var selects which one is active.
+ *   - "resend"  → uses RESEND_API_KEY  (recommended once you own a domain)
+ *   - "brevo"   → uses BREVO_API_KEY   (free, no domain required to send to anyone)
+ *   - "mock"    → no-op, logs only     (default when no key is configured)
+ *
+ * The interface keeps `EmailConsumer.deliver` agnostic so swapping providers
+ * is one env var change, no code redeploy.
+ */
+type Provider = 'resend' | 'brevo' | 'mock';
+
 @Injectable()
 export class EmailConsumer {
   private readonly logger = new Logger(EmailConsumer.name);
-  private readonly resend: Resend | null;
+  private readonly provider: Provider;
+  private readonly resend: Resend | null = null;
+  private readonly brevoApiKey: string | null = null;
   private readonly fromAddress: string;
+  private readonly fromName: string;
+  private readonly fromEmail: string;
 
   constructor(
     private readonly mq: RabbitMQService,
     private readonly prisma: PrismaService,
     private readonly analytics: AnalyticsService,
   ) {
-    const apiKey = process.env.RESEND_API_KEY;
-    this.resend = apiKey ? new Resend(apiKey) : null;
-    // Resend's sandbox-friendly default — works for the verified signup email
-    // without needing your own domain. Override with EMAIL_FROM later.
     this.fromAddress = process.env.EMAIL_FROM ?? 'FlowForge AI <onboarding@resend.dev>';
-    if (!this.resend) {
-      this.logger.warn('RESEND_API_KEY not set — emails will be mocked (logged only).');
-    } else {
-      this.logger.log(`Resend client ready — sending from "${this.fromAddress}"`);
+    // Brevo's API wants name + email split; parse "Name <email@domain>" once.
+    const parsed = parseFromAddress(this.fromAddress);
+    this.fromName = parsed.name;
+    this.fromEmail = parsed.email;
+
+    this.provider = pickProvider();
+    switch (this.provider) {
+      case 'resend':
+        this.resend = new Resend(process.env.RESEND_API_KEY!);
+        this.logger.log(`Resend client ready — sending from "${this.fromAddress}"`);
+        break;
+      case 'brevo':
+        this.brevoApiKey = process.env.BREVO_API_KEY!;
+        this.logger.log(`Brevo client ready — sending from "${this.fromName} <${this.fromEmail}>"`);
+        break;
+      case 'mock':
+      default:
+        this.logger.warn('No email provider configured — emails will be mocked (logged only).');
+        break;
     }
   }
 
@@ -65,7 +93,7 @@ export class EmailConsumer {
             status: JobStatus.SUCCESS,
             attempts: meta.attempt + 1,
             payload: payload as any,
-            result: { providerId } as any,
+            result: { providerId, provider: this.provider } as any,
             finishedAt: new Date(),
           },
         }).catch(() => undefined);
@@ -79,39 +107,79 @@ export class EmailConsumer {
     });
   }
 
-  /**
-   * Delivers an email via Resend when RESEND_API_KEY is configured.
-   * Falls back to a mock (stdout log) so local dev and unconfigured
-   * deployments still exercise the rest of the pipeline.
-   */
   private async deliver(to: string, subject: string, html: string, text: string | null): Promise<string> {
-    this.logger.log(`[email] -> ${to}  "${subject}"`);
+    this.logger.log(`[email/${this.provider}] -> ${to}  "${subject}"`);
+    const finalHtml = html || `<pre>${escapeHtml(text ?? '')}</pre>`;
 
-    if (!this.resend) {
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.debug(`[email] body: ${(text || html).slice(0, 200)}`);
-      }
-      await new Promise((r) => setTimeout(r, 50));
-      return `mock-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    switch (this.provider) {
+      case 'resend':
+        return this.deliverViaResend(to, subject, finalHtml, text);
+      case 'brevo':
+        return this.deliverViaBrevo(to, subject, finalHtml, text);
+      case 'mock':
+      default:
+        if (process.env.NODE_ENV !== 'production') {
+          this.logger.debug(`[email] body: ${(text || html).slice(0, 200)}`);
+        }
+        await new Promise((r) => setTimeout(r, 50));
+        return `mock-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     }
+  }
 
-    const { data, error } = await this.resend.emails.send({
+  private async deliverViaResend(to: string, subject: string, html: string, text: string | null): Promise<string> {
+    const { data, error } = await this.resend!.emails.send({
       from: this.fromAddress,
       to,
       subject,
-      html: html || `<pre>${escapeHtml(text ?? '')}</pre>`,
+      html,
       text: text ?? undefined,
     });
-
-    if (error) {
-      // Bubble up so RabbitMQ retries with exponential backoff.
-      throw new Error(`Resend error: ${error.name} — ${error.message}`);
-    }
-    if (!data?.id) {
-      throw new Error('Resend returned no message id');
-    }
+    if (error) throw new Error(`Resend error: ${error.name} — ${error.message}`);
+    if (!data?.id) throw new Error('Resend returned no message id');
     return data.id;
   }
+
+  private async deliverViaBrevo(to: string, subject: string, html: string, text: string | null): Promise<string> {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': this.brevoApiKey!,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: this.fromName, email: this.fromEmail },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: text ?? undefined,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { messageId?: string; message?: string; code?: string };
+    if (!res.ok) {
+      // 401 from Brevo usually means unverified sender or wrong API key; surface clearly.
+      throw new Error(`Brevo error: ${res.status} ${body.code ?? ''} ${body.message ?? res.statusText}`);
+    }
+    if (!body.messageId) throw new Error('Brevo returned no message id');
+    return body.messageId;
+  }
+}
+
+function pickProvider(): Provider {
+  const explicit = (process.env.EMAIL_PROVIDER ?? '').toLowerCase().trim();
+  if (explicit === 'resend' || explicit === 'brevo' || explicit === 'mock') return explicit;
+  // Implicit detection if EMAIL_PROVIDER isn't set: prefer Resend if its key
+  // is present, otherwise Brevo, otherwise mock.
+  if (process.env.RESEND_API_KEY) return 'resend';
+  if (process.env.BREVO_API_KEY) return 'brevo';
+  return 'mock';
+}
+
+function parseFromAddress(input: string): { name: string; email: string } {
+  // Accepts "Name <email@host>" or just "email@host".
+  const match = input.match(/^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/);
+  if (match) return { name: match[1] || 'FlowForge AI', email: match[2] };
+  return { name: 'FlowForge AI', email: input.trim() };
 }
 
 function escapeHtml(s: string): string {

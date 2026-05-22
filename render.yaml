@@ -64,8 +64,12 @@ services:
         value: 60
       - key: WORKER_CONCURRENCY
         value: 5
+      - key: EMAIL_PROVIDER
+        value: brevo   # "resend" | "brevo" | "mock"
       - key: RESEND_API_KEY
-        sync: false   # set manually in dashboard
+        sync: false   # set manually in dashboard (only if EMAIL_PROVIDER=resend)
+      - key: BREVO_API_KEY
+        sync: false   # set manually in dashboard (only if EMAIL_PROVIDER=brevo)
       - key: EMAIL_FROM
         value: FlowForge AI <onboarding@resend.dev>
 
