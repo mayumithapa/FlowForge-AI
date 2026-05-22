@@ -38,4 +38,4 @@ COPY --from=builder /repo/backend/tsconfig.json ./tsconfig.json
 EXPOSE 4000
 
 # Sync schema to the database on every boot (no migration files needed).
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/main.js"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main.js"]
