@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
+import { LandingPage } from '@/pages/LandingPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -20,6 +21,10 @@ export default function App() {
 
   return (
     <Routes>
+      <Route
+        path="/"
+        element={accessToken ? <Navigate to="/dashboard" replace /> : <LandingPage />}
+      />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
@@ -39,7 +44,7 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
-      <Route path="*" element={<Navigate to={accessToken ? '/dashboard' : '/login'} replace />} />
+      <Route path="*" element={<Navigate to={accessToken ? '/dashboard' : '/'} replace />} />
     </Routes>
   );
 }
